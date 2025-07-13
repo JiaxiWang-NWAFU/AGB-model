@@ -88,7 +88,7 @@ The script is written to handle large rasters by processing them in chunks.
 If you use this code in your research, please cite the associated paper:
 
 A framework for assessing aboveground biomass loss caused by rainfall extremes from multisource remote sensing data
-Jiaxi Wang, Xiaoqing Luo, Yayi Li, Xinhao Li, Na Deng, Shouzhang Peng, Feng Yang, Jinshi Jiana, Juying Jiao, 2025, In press
+Jiaxi Wang, Xiaoqing Luo, Yayi Li, Xinhao Li, Na Deng, Shouzhang Peng, Feng Yang, Jinshi Jiana, Juying Jiao, 2025, 
 
 📬 Contact
 For questions, please contact:
