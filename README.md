@@ -25,6 +25,7 @@ importance_agb.csv, factor_importance_rf.csv — Feature importance from both mo
 uncertainty_error_rf_model.csv — Uncertainty prediction results
 
 🚀 Workflow
+
 1️⃣ Data Preparation
 Input: Point data with AGB and environmental factors from three regions (.csv) and raster predictor layers (.tif).
 
