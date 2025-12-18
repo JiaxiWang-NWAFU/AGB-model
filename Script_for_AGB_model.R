@@ -270,6 +270,9 @@ write.csv(data.frame(Actual = all_error_data$error, Predicted = error_prediction
 
 library(terra)
 
+# Predictor raster files are loaded and explicitly reordered
+# to match the exact feature order used in point.csv and model training
+# (aspect, b1, b2, b3, b4, dem, ndvi, pvi, qulv, rvi, savi, slope)
 path.rasters <- list(
   Beijing = "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/BJ/data",
   Luochuan = "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/LC/data",
@@ -293,10 +296,16 @@ for (region in names(path.rasters)) {
   
   model_agb <- xgb.load("agb_model.xgb")
   final_rf_model <- readRDS("final_rf_model.rds")
+
+  set.seed(66)
   
   predict_chunk <- function(start_row, end_row, model, predictors) {
     chunk_values <- terra::values(predictors, row = start_row, nrows = end_row - start_row + 1)
     colnames(chunk_values) <- feature_names
+
+  # Enforce strict predictor order to match model training
+    chunk_values <- chunk_values[, feature_names]
+    
     predict(model, newdata = as.matrix(chunk_values))
   }
   
@@ -326,3 +335,4 @@ for (region in names(path.rasters)) {
   cat("Predicted AGB saved to:", output_file_agb, "\n")
   cat("Predicted error saved to:", output_file_error, "\n")
 }
+
