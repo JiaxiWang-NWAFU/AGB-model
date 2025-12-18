@@ -8,13 +8,13 @@ library(terra)
 library(parallel)
 
 # Set working directory
-setwd("F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors")
+setwd("F:/wangjiaxi/数据/GF7_rainstorm/9_AGB_factors")
 
 # Data paths
-beijing_path <- "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/BJ/30m/BJ_point.csv"
-luochuan_path <- "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/LC/30m/LC_point.csv"
-zixing_path <- "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/ZX/30m/ZX_point.csv"
-output_path <- "F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/cleaned_data.csv"
+beijing_path <- "F:/wangjiaxi/数据/GF7_rainstorm/9_AGB_factors/BJ/30m/BJ_point.csv"
+luochuan_path <- "F:/wangjiaxi/数据/GF7_rainstorm/9_AGB_factors/LC/30m/LC_point.csv"
+zixing_path <- "F:/wangjiaxi/数据/GF7_rainstorm/9_AGB_factors/ZX/30m/ZX_point.csv"
+output_path <- "F:/wangjiaxi/数据/GF7_rainstorm/9_AGB_factors/cleaned_data.csv"
 
 # Read datasets
 beijing_data <- read.csv(beijing_path)
@@ -26,9 +26,9 @@ str(beijing_data)
 str(luochuan_data)
 str(zixing_data)
 
-# Data cleaning: remove rows with -9999 values
+# Data cleaning: remove rows with -9999 or 0 values
 clean_data <- function(data) {
-  data <- data %>% filter_all(all_vars(. != -9999))
+  data <- data %>% filter_all(all_vars(. != -9999& . != 0))
   return(data)
 }
 
@@ -54,19 +54,34 @@ all_data <- read.csv(output_path)
 # ===========================
 
 set.seed(66)
+
+# Random seeds were fixed to ensure reproducibility.
+# Parallel computation was not enforced within XGBoost or RF,
+# ensuring deterministic model behavior across runs.
+
 train_index <- createDataPartition(all_data$AGB, p = 0.7, list = FALSE)
 train_data <- all_data[train_index, ]
 test_data <- all_data[-train_index, ]
 
-dtrain <- xgb.DMatrix(data = as.matrix(train_data[, !colnames(train_data) %in% "AGB"]), label = train_data$AGB)
-dtest <- xgb.DMatrix(data = as.matrix(test_data[, !colnames(test_data) %in% "AGB"]), label = test_data$AGB)
+dtrain <- xgb.DMatrix(
+  data = as.matrix(train_data[, !colnames(train_data) %in% "AGB"]),
+  label = log1p(train_data$AGB)
+)
+
+dtest <- xgb.DMatrix(
+  data = as.matrix(test_data[, !colnames(test_data) %in% "AGB"]),
+  label = log1p(test_data$AGB)
+)
+
 
 param_grid <- expand.grid(
-  nrounds = c(100, 200, 300),
-  eta = c(0.01, 0.05, 0.1),
-  max_depth = c(4, 6, 8),
-  colsample_bytree = c(0.5, 0.7, 1.0),
-  subsample = c(0.5, 0.7, 1.0)
+  nrounds = c(300, 500),
+  eta = c(0.05, 0.1),
+  max_depth = c(6, 8, 10),
+  min_child_weight = c(1, 5),
+  gamma = c(0, 1),
+  colsample_bytree = c(0.8, 1.0),
+  subsample = c(0.9, 1.0)
 )
 
 best_rmse <- Inf
@@ -78,6 +93,8 @@ for (i in 1:nrow(param_grid)) {
   params <- list(
     eta = param_grid$eta[i],
     max_depth = param_grid$max_depth[i],
+    min_child_weight = param_grid$min_child_weight[i],
+    gamma = param_grid$gamma[i],
     colsample_bytree = param_grid$colsample_bytree[i],
     subsample = param_grid$subsample[i],
     objective = "reg:squarederror",
@@ -125,8 +142,11 @@ write.csv(importance_agb, "importance_agb.csv", row.names = TRUE)
 
 
 # Model evaluation
-train_predictions_agb <- predict(model_agb, dtrain)
-test_predictions_agb <- predict(model_agb, dtest)
+train_predictions_log <- predict(model_agb, dtrain)
+test_predictions_log  <- predict(model_agb, dtest)
+
+train_predictions_agb <- expm1(train_predictions_log)
+test_predictions_agb  <- expm1(test_predictions_log)
 
 # Metrics (train)
 train_r_squared <- 1 - sum((train_data$AGB - train_predictions_agb)^2) / sum((train_data$AGB - mean(train_data$AGB))^2)
@@ -141,6 +161,9 @@ test_rmse <- rmse(test_data$AGB, test_predictions_agb)
 test_mae <- mae(test_data$AGB, test_predictions_agb)
 test_pbias <- 100 * sum(test_predictions_agb - test_data$AGB) / sum(test_data$AGB)
 test_nse <- NSE(test_predictions_agb, test_data$AGB)
+
+# NSE was computed following the standard Nash–Sutcliffe definition
+# (hydroGOF::NSE), with predictions as "sim" and observations as "obs"
 
 metrics <- data.frame(
   Metric = c("R-squared", "RMSE", "MAE", "PBIAS", "NSE"),
@@ -159,6 +182,7 @@ write.csv(data.frame(Actual = test_data$AGB, Predicted = test_predictions_agb), 
 # Error model (Random Forest)
 # ================================
 
+set.seed(66)
 train_predictions <- read.csv("train_predictions.csv")
 test_predictions <- read.csv("test_predictions.csv")
 
@@ -223,7 +247,7 @@ error_predictions <- predict(final_rf_model, newdata = all_error_data)
 rmse_error <- sqrt(mean((all_error_data$error - error_predictions)^2))
 mae_error <- mean(abs(all_error_data$error - error_predictions))
 r_squared_error <- 1 - sum((all_error_data$error - error_predictions)^2) / sum((all_error_data$error - mean(all_error_data$error))^2)
-nse_error <- r_squared_error
+nse_error <- 1 - sum((all_error_data$error - error_predictions)^2) / sum((all_error_data$error - mean(all_error_data$error))^2)
 pbias_error <- 100 * sum(all_error_data$error - error_predictions) / sum(all_error_data$error)
 
 metrics_error <- data.frame(
@@ -240,6 +264,10 @@ write.csv(data.frame(Actual = all_error_data$error, Predicted = error_prediction
 # Predict AGB and error rasters
 # ================================
 
+# Raster prediction was implemented using a chunk-wise approach
+# rather than terra::predict(), to ensure strict control over
+# predictor order, memory usage, and compatibility with XGBoost models.
+
 library(terra)
 
 path.rasters <- list(
@@ -251,6 +279,9 @@ path.rasters <- list(
 for (region in names(path.rasters)) {
   path.plot <- paste0("F:/wangjiaxi/data/GF7_rainstorm/9_AGB_factors/", region)
   rasterFiles <- list.files(path = path.rasters[[region]], pattern = '.tif$', full.names = TRUE)
+  
+  # Only GeoTIFF predictor layers (.tif) were loaded to avoid
+  # accidental inclusion of auxiliary or temporary files
   
   cat("Reading raster files for", region, "\n")
   print(rasterFiles)
